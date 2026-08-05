@@ -52,3 +52,10 @@ USE_VERDICT_SERVICE = True
 # Give HA a DHCP reservation so this cannot drift.
 VERDICT_URL = "http://192.168.1.110:8099/verdict"
 VERDICT_TIMEOUT = 5
+
+# Poll faster on the service path than on the Tibber one. The service call is a
+# LAN request costing nothing, and the peak-risk verdict depends on live house
+# load - switch on the oven and a 5-minute panel keeps saying STARTA NU for up
+# to five minutes. The Tibber fallback keeps 300s because it hits an external
+# API with rate limits.
+VERDICT_UPDATE_INTERVAL = 60

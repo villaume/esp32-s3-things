@@ -48,6 +48,10 @@ try:
     VERDICT_TIMEOUT
 except NameError:
     VERDICT_TIMEOUT = 5
+try:
+    VERDICT_UPDATE_INTERVAL
+except NameError:
+    VERDICT_UPDATE_INTERVAL = 60
 
 try:
     PRICE_GREEN_MAX
@@ -359,7 +363,14 @@ def draw_price(current, window, verdict=None):
     # Large current price
     center_text(font, str(price_ore), y_price, color)
     if y_unit is not None:
-        center_text(font_small, "ore/kWh", y_unit, WHITE)
+        if verdict and verdict.get("power_kw") is not None:
+            # center_best picks the longest variant that fits the round panel.
+            kw = verdict["power_kw"]
+            center_best(font_small,
+                        ("ore/kWh   %.1f kW" % kw, "ore  %.1fkW" % kw, "ore/kWh"),
+                        y_unit, WHITE)
+        else:
+            center_text(font_small, "ore/kWh", y_unit, WHITE)
 
     # Relative price bar
     bar_width = 180
@@ -395,8 +406,10 @@ def draw_price(current, window, verdict=None):
                 "+%dh" % away)
     center_best(font_small, tail, y_wprice, WHITE)
 
-    print("Display updated: %d ore/kWh, best %02d-%02d @ %d ore"
-          % (price_ore, window['start_hour'], window['end_hour'],
+    print("Display updated: %d ore/kWh, best %s @ %d ore"
+          % (price_ore,
+             window.get('label') or ("%02d-%02d" % (window['start_hour'],
+                                                    window['end_hour'])),
              window['avg_ore']))
 
 # Main
@@ -412,11 +425,12 @@ def main():
 
         # Main loop
         last_update = 0
+        interval = VERDICT_UPDATE_INTERVAL if USE_VERDICT_SERVICE else PRICE_UPDATE_INTERVAL
 
         while True:
             current_time = time.time()
 
-            if current_time - last_update > PRICE_UPDATE_INTERVAL or last_update == 0:
+            if current_time - last_update > interval or last_update == 0:
                 current = window = verdict = None
 
                 if USE_VERDICT_SERVICE and VERDICT_URL:
@@ -426,6 +440,9 @@ def main():
                     current, hours = get_tibber_prices()
                     window = find_best_window(current, hours)
                     hours = None
+                    interval = PRICE_UPDATE_INTERVAL   # external API: be gentle
+                else:
+                    interval = VERDICT_UPDATE_INTERVAL
 
                 draw_price(current, window, verdict)
                 last_update = current_time
