@@ -28,3 +28,16 @@ BEST_WINDOW_HOURS = 1
 PRICE_GREEN_MAX = 50    # below this = green
 PRICE_YELLOW_MAX = 100  # below this = yellow, above = red
 PRICE_BAR_MAX = 200     # öre/kWh that fills the bar completely
+
+# --- Verdict service (LAN) ---------------------------------------------------
+# When True the board asks the verdict service on Home Assistant instead of
+# computing from Tibber itself. The service knows things the board cannot:
+# live household power, the month's peak budget, and the effekttariff. It also
+# means the decision logic can change without reflashing.
+#
+# Set False, or simply take the service down, to fall back to the direct-Tibber
+# path below — the board does that automatically on any error or stale reading,
+# so a bad deploy cannot leave you with a blank display.
+USE_VERDICT_SERVICE = True
+VERDICT_URL = "http://homeassistant.local:8099/verdict"
+VERDICT_TIMEOUT = 5

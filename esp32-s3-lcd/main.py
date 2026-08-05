@@ -35,6 +35,20 @@ try:
 except NameError:
     BEST_WINDOW_HOURS = 1
 
+# Older config.py on the device must keep working after an OTA of main.py only.
+try:
+    USE_VERDICT_SERVICE
+except NameError:
+    USE_VERDICT_SERVICE = False
+try:
+    VERDICT_URL
+except NameError:
+    VERDICT_URL = ""
+try:
+    VERDICT_TIMEOUT
+except NameError:
+    VERDICT_TIMEOUT = 5
+
 try:
     PRICE_GREEN_MAX
 except NameError:
@@ -180,6 +194,66 @@ def get_tibber_prices():
                 pass
         return None, []
 
+VERDICT_TEXT = {
+    "STARTA_NU": "STARTA NU",
+    "VANTA": "VANTA",
+    "HOG_LAST": "HOG LAST",
+    "VANTA_UT_TIMMEN": "VANTA UT",
+}
+
+
+def get_verdict():
+    """Ask the LAN service. Returns (current, window, verdict) or three Nones.
+
+    Adapts onto the same shapes draw_price already renders, so the service path
+    and the direct-Tibber fallback share every line of drawing code.
+
+    Any failure - unreachable, malformed, or flagged stale - returns Nones so
+    the caller falls back. A display quietly showing an hour-old verdict is
+    worse than one showing a slightly worse answer computed fresh.
+    """
+    response = None
+    try:
+        import urequests
+        try:
+            response = urequests.get(VERDICT_URL, timeout=VERDICT_TIMEOUT)
+        except TypeError:
+            # Not every MicroPython urequests build accepts timeout.
+            response = urequests.get(VERDICT_URL)
+
+        d = response.json()
+        response.close()
+        response = None
+        gc.collect()
+
+        if not d.get("verdict") or d.get("stale"):
+            print("Verdict service stale or empty; falling back")
+            return None, None, None
+
+        away = d["best_offset_minutes"] // 60
+        current = {"total": d["spot_now"]}
+        window = {
+            "avg_ore": int(round(d["best_price"] * 100)),
+            "is_now": d["best_offset_minutes"] == 0,
+            "start_hour": d.get("best_start_hour", 0),
+            "end_hour": d.get("best_end_hour", 0),
+            "hours_away": away,
+            "label": d.get("best_window"),
+        }
+        print("Verdict: %s, spot %.3f, best %s" %
+              (d["verdict"], d["spot_now"], d.get("best_window")))
+        return current, window, d
+
+    except Exception as e:
+        print("Verdict service error: %s" % e)
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+        return None, None, None
+
+
 # startsAt looks like "2026-08-04T14:00:00.000+02:00"
 def hour_of(entry):
     return int(entry['startsAt'][11:13])
@@ -249,7 +323,7 @@ def center_best(f, candidates, y, color):
     center_text(f, candidates[-1], y, color)
 
 # Draw price + best window on display
-def draw_price(current, window):
+def draw_price(current, window, verdict=None):
     tft.fill(BLACK)
 
     if current is None:
@@ -261,8 +335,17 @@ def draw_price(current, window):
 
     # Header. The panel is round, so the title has to sit low enough that the
     # bezel does not eat the first and last characters.
-    tft.fill_rect(0, 0, DISPLAY_WIDTH, 46, BLUE)
-    center_text(font, "ELPRIS", 12, WHITE)
+    #
+    # With the service the header carries the verdict, which is the one thing
+    # worth reading across a room; the price becomes supporting detail.
+    if verdict:
+        v = verdict.get("verdict")
+        head = VERDICT_TEXT.get(v, v or "ELPRIS")
+        hbg = GREEN if v == "STARTA_NU" else (RED if v == "HOG_LAST" else BLUE)
+    else:
+        head, hbg = "ELPRIS", BLUE
+    tft.fill_rect(0, 0, DISPLAY_WIDTH, 46, hbg)
+    center_text(font, head, 12, WHITE)
 
     if HAS_SMALL:
         y_price, y_unit, y_bar = 52, 88, 110
@@ -298,7 +381,10 @@ def draw_price(current, window):
         center_text(font_small, "BILLIGAST NU" if window['is_now'] else "BILLIGAST",
                     y_label, GRAY)
 
-    center_text(font, "%02d-%02d" % (window['start_hour'], window['end_hour']),
+    # The service sends a minute-accurate label, because prices are
+    # quarter-hourly and "00:30-02:30" is not expressible as two hour numbers.
+    center_text(font, window.get('label') or
+                ("%02d-%02d" % (window['start_hour'], window['end_hour'])),
                 y_window, wcolor)
 
     ore, away = window['avg_ore'], window['hours_away']
@@ -331,11 +417,18 @@ def main():
             current_time = time.time()
 
             if current_time - last_update > PRICE_UPDATE_INTERVAL or last_update == 0:
-                current, hours = get_tibber_prices()
-                window = find_best_window(current, hours)
-                draw_price(current, window)
+                current = window = verdict = None
+
+                if USE_VERDICT_SERVICE and VERDICT_URL:
+                    current, window, verdict = get_verdict()
+
+                if current is None:      # service off, down, or stale
+                    current, hours = get_tibber_prices()
+                    window = find_best_window(current, hours)
+                    hours = None
+
+                draw_price(current, window, verdict)
                 last_update = current_time
-                hours = None
                 gc.collect()
 
             time.sleep(10)
