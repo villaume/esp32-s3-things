@@ -39,5 +39,16 @@ PRICE_BAR_MAX = 200     # öre/kWh that fills the bar completely
 # path below — the board does that automatically on any error or stale reading,
 # so a bad deploy cannot leave you with a blank display.
 USE_VERDICT_SERVICE = True
-VERDICT_URL = "http://homeassistant.local:8099/verdict"
+
+# An IP, not homeassistant.local, on purpose. MicroPython's mDNS resolution on
+# ESP32 varies by build, and this network answers .local with TWO addresses
+# (192.168.1.110 and .112, both serving) - so a board that picks the wrong one
+# would fall back silently and look like the service was down. Verified from
+# the LAN: both IPs return HTTP 200.
+#
+# NOT the Tailscale address (100.119.117.79): that only works for tailnet
+# members, and this board is on plain wifi.
+#
+# Give HA a DHCP reservation so this cannot drift.
+VERDICT_URL = "http://192.168.1.110:8099/verdict"
 VERDICT_TIMEOUT = 5
